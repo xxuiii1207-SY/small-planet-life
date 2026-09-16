@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://small-planet-life.giving-stoat-2985.chatgpt.site"),
+  metadataBase: new URL("https://small-planet-life.hmm1209qwe.chatgpt.site"),
   title: "小小星球｜个人生活工作台",
   description: "把存钱、倒计时、月度目标、追星行程、生活记录、读书打卡和心愿放在同一颗小小星球。",
   applicationName: "小小星球",
