@@ -129,6 +129,7 @@ export interface DiaryEntry extends BaseRecord {
 
 export interface Book extends BaseRecord {
   title: string;
+  coverImageId: string | null;
   status: "wantToRead" | "reading" | "finished";
   progressMode: "pages" | "percent";
   totalPages: number;
@@ -202,6 +203,8 @@ export interface AppPreferences {
   lastBackupAt: string | null;
   backupReminderMonth: string | null;
   homeBannerImageId: string | null;
+  homeGreeting: string;
+  homeMessage: string;
 }
 
 export interface ImageAsset {
@@ -319,7 +322,7 @@ export function createDemoData(): AppData {
   ];
 
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     savingsTargets: [goal],
     savingsTransactions: transactions,
     countdowns: [
@@ -370,6 +373,7 @@ export function createDemoData(): AppData {
       {
         ...baseRecord("book"),
         title: "正在读的一本书",
+        coverImageId: null,
         status: "reading",
         progressMode: "percent",
         totalPages: 0,
@@ -425,6 +429,8 @@ export const defaultPreferences: AppPreferences = {
   lastBackupAt: null,
   backupReminderMonth: null,
   homeBannerImageId: null,
+  homeGreeting: "早上好，",
+  homeMessage: "今天也要好好生活呀。",
 };
 
 export function active<T extends BaseRecord>(records: T[]): T[] {

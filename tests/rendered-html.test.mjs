@@ -46,3 +46,26 @@ test("ships core PWA and product capabilities", async () => {
     access(new URL("../public/banner-still-life.png", import.meta.url)),
   ]);
 });
+
+test("keeps the repaired mobile workflows in the production source", async () => {
+  const [app, styles, manifest] = await Promise.all([
+    readFile(new URL("../app/SmallPlanetApp.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../public/manifest.webmanifest", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(app, /preferencesRef/);
+  assert.match(app, /新增艺人/);
+  assert.match(app, /编辑倒计时/);
+  assert.match(app, /批量彻底删除/);
+  assert.match(app, /occurredDate/);
+  assert.match(app, /coverImageId/);
+
+  const heroPhotoRule = styles.match(/\.hero__photo\s*\{[^}]+\}/)?.[0] ?? "";
+  assert.doesNotMatch(heroPhotoRule, /grayscale/);
+  assert.match(styles, /\.hero__photo img[^}]+object-fit:\s*cover/);
+
+  const iconPurposes = JSON.parse(manifest).icons.map((icon) => icon.purpose);
+  assert.ok(iconPurposes.includes("any"));
+  assert.ok(iconPurposes.includes("maskable"));
+});

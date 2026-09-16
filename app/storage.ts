@@ -53,6 +53,14 @@ interface BackupPayload {
   assets: Array<Omit<ImageAsset, "blob"> & { data: string }>;
 }
 
+function migrateAppData(data: AppData): AppData {
+  return {
+    ...data,
+    schemaVersion: 2,
+    books: (data.books ?? []).map((book) => ({ ...book, coverImageId: book.coverImageId ?? null })),
+  };
+}
+
 function requestResult<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
@@ -96,7 +104,11 @@ export async function loadAppData(): Promise<AppData> {
     transaction.objectStore(DATA_STORE).get("main") as IDBRequest<StoredData | undefined>,
   );
   database.close();
-  if (record?.data) return record.data;
+  if (record?.data) {
+    const migrated = migrateAppData(record.data);
+    if (record.data.schemaVersion !== migrated.schemaVersion) await saveAppData(migrated);
+    return migrated;
+  }
   const initial = createDemoData();
   await saveAppData(initial);
   return initial;
@@ -439,7 +451,7 @@ export async function readEncryptedBackup(
     blob: new Blob([fromBase64(data)], { type: asset.mimeType }),
   }));
   return {
-    data: payload.data,
+    data: migrateAppData(payload.data),
     preferences: { ...defaultPreferences, ...payload.preferences },
     security: payload.security,
     assets,

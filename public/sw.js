@@ -1,4 +1,4 @@
-const CACHE = "small-planet-github-v1";
+const CACHE = "small-planet-github-v2";
 const asset = (path = "") => new URL(path, self.registration.scope).toString();
 const CORE = [
   asset(),

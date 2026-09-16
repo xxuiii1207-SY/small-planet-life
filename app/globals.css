@@ -165,8 +165,8 @@ svg { width: 19px; height: 19px; stroke-width: 1.6; flex: 0 0 auto; }
   background: var(--surface-solid);
   box-shadow: var(--shadow);
 }
-.hero__photo { min-height: 360px; background-position: center; background-size: cover; background-repeat: no-repeat; filter: grayscale(1) contrast(.94); }
-.hero__photo img { width: 100%; height: 100%; min-height: 360px; object-fit: cover; }
+.hero__photo { position: relative; min-height: 360px; overflow: hidden; background-position: center; background-size: cover; background-repeat: no-repeat; }
+.hero__photo img { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: cover; }
 .hero__copy { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; padding: clamp(40px, 6vw, 85px); }
 .hero__copy h2 { margin: 6px 0 28px; font-size: clamp(34px, 4vw, 59px); letter-spacing: -.035em; }
 .polka-field {
@@ -268,6 +268,7 @@ svg { width: 19px; height: 19px; stroke-width: 1.6; flex: 0 0 auto; }
 .review-card p { margin: 0; color: var(--muted); }
 
 .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 18px; margin-bottom: 24px; }
+.fandom-toolbar { margin-top: 34px; }
 .segmented, .choice-row { display: inline-flex; gap: 4px; padding: 4px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); }
 .segmented button, .choice-row button { display: inline-flex; align-items: center; gap: 6px; padding: 8px 13px; border: 0; border-radius: 999px; background: transparent; color: var(--muted); cursor: pointer; }
 .segmented button.is-active, .choice-row button.is-active { background: var(--ink); color: var(--paper); }
@@ -280,6 +281,14 @@ svg { width: 19px; height: 19px; stroke-width: 1.6; flex: 0 0 auto; }
 .event-card__body p, .event-card__body small { color: var(--muted); }
 .event-card__visual { display: grid; place-items: center; }
 .event-card__visual svg { width: 36px; height: 36px; }
+.artist-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.artist-card { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 18px; overflow: hidden; padding: 18px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: 0 11px 35px rgba(42,37,30,.045); }
+.artist-card__avatar { display: grid; min-height: 148px; overflow: hidden; place-items: center; border-radius: 18px; background: var(--accent-soft); }
+.artist-card__avatar img { display: block; width: 100%; height: 100%; min-height: 148px; object-fit: cover; }
+.artist-card__avatar svg { width: 34px; height: 34px; }
+.artist-card__body h3 { margin: 9px 0 2px; font: 500 24px/1.2 var(--serif); }
+.artist-card__body p, .artist-card__body small { display: block; margin: 3px 0; color: var(--muted); }
+.artist-card__nickname { font-style: italic; }
 .calendar-panel { padding: 24px; border-radius: var(--radius); }
 .calendar-week, .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 7px; }
 .calendar-week span { padding: 8px; color: var(--muted); font-size: 11px; text-align: center; }
@@ -305,7 +314,8 @@ svg { width: 19px; height: 19px; stroke-width: 1.6; flex: 0 0 auto; }
 
 .book-grid, .wish-grid, .settings-grid, .more-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
 .book-card { display: grid; grid-template-columns: 115px minmax(0,1fr); gap: 22px; padding: 22px; border-radius: var(--radius); }
-.book-cover { display: grid; min-height: 160px; place-items: center; border-radius: 10px 18px 18px 10px; background: var(--accent-soft); box-shadow: inset 5px 0 rgba(0,0,0,.06); }
+.book-cover { display: grid; min-height: 160px; overflow: hidden; place-items: center; border-radius: 10px 18px 18px 10px; background: var(--accent-soft); box-shadow: inset 5px 0 rgba(0,0,0,.06); }
+.book-cover img { display: block; width: 100%; height: 100%; min-height: 160px; object-fit: cover; }
 .book-cover svg { width: 33px; height: 33px; }
 .book-card h3 { margin: 10px 0 15px; font: 500 23px/1.2 var(--serif); }
 .book-card small { color: var(--muted); }
@@ -373,6 +383,12 @@ input[type="checkbox"] { width: 17px; min-height: 17px; accent-color: var(--ink)
 .layout-row { display: grid; grid-template-columns: auto minmax(0,1fr) auto auto auto auto; align-items: center; gap: 9px; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .layout-row button { padding: 5px 8px; border: 1px solid var(--line); border-radius: 8px; background: transparent; cursor: pointer; }
 .layout-row label { display: flex; flex-direction: row; align-items: center; gap: 4px; }
+.home-copy-editor { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; padding: 15px; border: 1px solid var(--line); border-radius: 14px; background: var(--paper); }
+.home-copy-editor small { grid-column: 1 / -1; color: var(--muted); }
+.trash-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; padding: 14px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+.trash-toolbar > div { display: flex; flex-wrap: wrap; gap: 9px; margin-left: auto; }
+.trash-toolbar .button:disabled { opacity: .42; cursor: not-allowed; }
+.trash-row { grid-template-columns: auto auto minmax(0, 1fr) auto auto; }
 
 .floating-add { position: fixed; right: 27px; bottom: 27px; z-index: 30; display: grid; width: 56px; height: 56px; place-items: center; border: 0; border-radius: 50%; background: var(--ink); color: var(--paper); box-shadow: 0 12px 30px rgba(0,0,0,.22); cursor: pointer; transition: transform .2s; }
 .floating-add:hover { transform: rotate(7deg) scale(1.04); }
@@ -403,6 +419,7 @@ input[type="checkbox"] { width: 17px; min-height: 17px; accent-color: var(--ink)
   .home-slot, .home-slot--wide, .home-slot--small { grid-column: span 12; }
   .countdown-grid { grid-template-columns: repeat(2,1fr); }
   .stats-row { grid-template-columns: repeat(2,1fr); }
+  .artist-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 760px) {
@@ -431,7 +448,7 @@ input[type="checkbox"] { width: 17px; min-height: 17px; accent-color: var(--ink)
   .fandom-card { grid-template-columns: 1fr 120px; min-height: 260px; }
   .life-card { grid-template-columns: 1fr; min-height: 300px; }
   .life-card__details { padding-top: 0; }
-  .stats-row, .countdown-grid, .book-grid, .wish-grid, .settings-grid, .more-grid { grid-template-columns: 1fr; }
+  .stats-row, .countdown-grid, .book-grid, .wish-grid, .settings-grid, .more-grid, .artist-grid { grid-template-columns: 1fr; }
   .event-card { grid-template-columns: 65px minmax(0,1fr); }
   .event-card__visual { display: none; }
   .calendar-panel { padding: 11px; overflow-x: auto; }
@@ -450,6 +467,12 @@ input[type="checkbox"] { width: 17px; min-height: 17px; accent-color: var(--ink)
   .quick-grid { grid-template-columns: repeat(2,1fr); }
   .layout-row { grid-template-columns: auto minmax(0,1fr) auto auto; }
   .layout-row > :nth-last-child(-n+2) { grid-column: span 2; }
+  .home-copy-editor { grid-template-columns: 1fr; }
+  .home-copy-editor small { grid-column: auto; }
+  .trash-toolbar { align-items: stretch; flex-direction: column; }
+  .trash-toolbar > div { margin-left: 0; }
+  .trash-row { grid-template-columns: auto auto minmax(0,1fr); }
+  .trash-row > .text-button { grid-column: span 1; }
   .modal-backdrop { align-items: end; padding: 0; }
   .modal { width: 100%; max-height: 92vh; border-radius: 23px 23px 0 0; }
 }
@@ -458,6 +481,7 @@ input[type="checkbox"] { width: 17px; min-height: 17px; accent-color: var(--ink)
   .fandom-card { grid-template-columns: 1fr; }
   .fandom-card__image { min-height: 175px; }
   .book-card { grid-template-columns: 86px minmax(0,1fr); }
+  .artist-card { grid-template-columns: 88px minmax(0, 1fr); padding: 14px; }
   .goal-row { grid-template-columns: 37px minmax(0,1fr) auto; gap: 9px; }
   .compact-row { gap: 9px; padding-inline: 5px; }
 }

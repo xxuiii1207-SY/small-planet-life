@@ -45,6 +45,7 @@ import {
 import {
   type AppData,
   type AppPreferences,
+  type Artist,
   type BaseRecord,
   type Book,
   type CountdownEvent,
@@ -128,6 +129,7 @@ interface ModalState {
 }
 
 type RecordCollection = Exclude<keyof AppData, "schemaVersion">;
+type TrashRow = { collection: RecordCollection; record: BaseRecord; label: string };
 
 const publicAsset = (path: string) => `${import.meta.env.BASE_URL ?? "/"}${path.replace(/^\//, "")}`;
 
@@ -171,11 +173,16 @@ function isoNow(): string {
 }
 
 function today(): string {
-  return new Date().toISOString().slice(0, 10);
+  const date = new Date();
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
 function monthNow(): string {
-  return new Date().toISOString().slice(0, 7);
+  return today().slice(0, 7);
+}
+
+function trashKey(collection: RecordCollection, id: string): string {
+  return `${collection}:${id}`;
 }
 
 function formatDate(date: string | null): string {
@@ -290,15 +297,19 @@ export default function SmallPlanetApp() {
   const [busy, setBusy] = useState(false);
   const [fandomMode, setFandomMode] = useState<"timeline" | "calendar">("timeline");
   const [lifeMode, setLifeMode] = useState<"timeline" | "grid">("timeline");
+  const [selectedTrash, setSelectedTrash] = useState<string[]>([]);
   const activityRef = useRef(0);
+  const preferencesRef = useRef<AppPreferences>(defaultPreferences);
 
   useEffect(() => {
     let mounted = true;
     void loadAppData()
       .then((loaded) => {
         if (!mounted) return;
+        const loadedPreferences = loadPreferences();
         setData(loaded);
-        setPreferences(loadPreferences());
+        preferencesRef.current = loadedPreferences;
+        setPreferences(loadedPreferences);
         setSecurity(loadDiarySecurity());
       })
       .catch((reason: unknown) => {
@@ -316,7 +327,6 @@ export default function SmallPlanetApp() {
     const root = document.documentElement;
     root.dataset.theme = preferences.themeMode;
     root.dataset.accent = preferences.accentTheme;
-    savePreferences(preferences);
   }, [preferences]);
 
   useEffect(() => {
@@ -377,19 +387,14 @@ export default function SmallPlanetApp() {
   };
 
   const updatePreferences = (patch: Partial<AppPreferences>) => {
-    setPreferences((current) => ({ ...current, ...patch }));
+    const next = { ...preferencesRef.current, ...patch };
+    preferencesRef.current = next;
+    savePreferences(next);
+    setPreferences(next);
   };
 
   const softDelete = async (collection: RecordCollection, id: string) => {
     if (!data) return;
-    if (collection === "savingsTargets") {
-      const linked = active(data.wishes).some((wish) => wish.savingsTargetId === id)
-        || active(data.fandomEvents).some((event) => event.savingsTargetId === id);
-      if (linked) {
-        setToast("这个目标仍有关联内容，请先归档或解除关联");
-        return;
-      }
-    }
     const now = isoNow();
     const records = data[collection] as unknown as BaseRecord[];
     const next = {
@@ -398,6 +403,22 @@ export default function SmallPlanetApp() {
         record.id === id ? { ...record, deletedAt: now, updatedAt: now } : record,
       ),
     } as AppData;
+
+    if (collection === "savingsTargets") {
+      next.savingsTransactions = next.savingsTransactions.map((transaction) =>
+        transaction.targetId === id
+          ? { ...transaction, deletedAt: now, updatedAt: now }
+          : transaction,
+      );
+    }
+
+    if (collection === "artists") {
+      next.countdowns = next.countdowns.map((countdown) =>
+        countdown.sourceId === id && (countdown.sourceType === "artistBirthday" || countdown.sourceType === "artistDebut")
+          ? { ...countdown, deletedAt: now, status: "ended", updatedAt: now }
+          : countdown,
+      );
+    }
 
     if (collection === "fandomExpenses") {
       const expense = data.fandomExpenses.find((item) => item.id === id);
@@ -431,6 +452,20 @@ export default function SmallPlanetApp() {
         record.id === id ? { ...record, deletedAt: null, updatedAt: isoNow() } : record,
       ),
     } as AppData;
+    if (collection === "savingsTargets") {
+      next.savingsTransactions = next.savingsTransactions.map((transaction) =>
+        transaction.targetId === id
+          ? { ...transaction, deletedAt: null, updatedAt: isoNow() }
+          : transaction,
+      );
+    }
+    if (collection === "artists") {
+      next.countdowns = next.countdowns.map((countdown) =>
+        countdown.sourceId === id && (countdown.sourceType === "artistBirthday" || countdown.sourceType === "artistDebut")
+          ? { ...countdown, deletedAt: null, status: "active", updatedAt: isoNow() }
+          : countdown,
+      );
+    }
     if (collection === "fandomExpenses") {
       const expense = data.fandomExpenses.find((item) => item.id === id);
       if (expense?.savingsTransactionId) {
@@ -483,6 +518,7 @@ export default function SmallPlanetApp() {
   const transactions = active(data.savingsTransactions);
   const countdowns = active(data.countdowns);
   const goals = active(data.monthlyGoals);
+  const artists = active(data.artists);
   const events = active(data.fandomEvents);
   const expenses = active(data.fandomExpenses);
   const diaries = active(data.diaryEntries);
@@ -491,7 +527,7 @@ export default function SmallPlanetApp() {
   const wishes = active(data.wishes);
   const currentMonthGoals = goals.filter((goal) => goal.month === monthNow());
   const nextCountdown = [...countdowns]
-    .filter((item) => item.status === "active")
+    .filter((item) => item.status === "active" && daysUntil(effectiveCountdownDate(item.targetDate, item.repeatYearly)) >= 0)
     .sort((left, right) => Number(right.isPinned) - Number(left.isPinned)
       || daysUntil(effectiveCountdownDate(left.targetDate, left.repeatYearly))
         - daysUntil(effectiveCountdownDate(right.targetDate, right.repeatYearly)))[0];
@@ -543,7 +579,7 @@ export default function SmallPlanetApp() {
           </div>
           <div className="hero__copy polka-field">
             <p className="eyebrow">TODAY · {formatDate(today())}</p>
-            <h2>早上好，<br />今天也要好好生活呀。</h2>
+            <h2>{preferences.homeGreeting}<br />{preferences.homeMessage}</h2>
             <label className="text-button file-button"><Camera size={15} /> 更换封面<input type="file" accept="image/*" onChange={(event) => { const file = event.currentTarget.files?.[0]; if (file) void updateHomeBanner(file); event.currentTarget.value = ""; }} /></label>
           </div>
         </section>
@@ -667,8 +703,6 @@ export default function SmallPlanetApp() {
         {targets.length ? <div className="card-list">{targets.map((target) => {
           const value = amountForTarget(data!, target.id);
           const progress = (value / target.targetAmount) * 100;
-          const linked = active(data!.wishes).some((wish) => wish.savingsTargetId === target.id)
-            || active(data!.fandomEvents).some((event) => event.savingsTargetId === target.id);
           return <article className="record-card" key={target.id}>
             <div className="record-card__head"><div><span className="tag">{target.currency}</span><h3>{target.name}</h3></div><strong>{formatMoney(value, target.currency)}</strong></div>
             <Progress value={progress} />
@@ -676,7 +710,7 @@ export default function SmallPlanetApp() {
             <div className="record-actions">
               <button onClick={() => setModal({ kind: "transaction", id: target.id })}><ArrowDownToLine />存取</button>
               <button onClick={() => void commit({ ...data!, savingsTargets: data!.savingsTargets.map((item) => item.id === target.id ? { ...item, status: "archived", updatedAt: isoNow() } : item) }, "已归档")}><Archive />归档</button>
-              <button disabled={linked} title={linked ? "有关联内容时只能归档" : "删除"} onClick={() => window.confirm("移入回收站？") && void softDelete("savingsTargets", target.id)}><Trash2 />删除</button>
+              <button onClick={() => window.confirm("删除目标后，相关流水会一起移入回收站；心愿和行程不会删除。继续吗？") && void softDelete("savingsTargets", target.id)}><Trash2 />删除</button>
             </div>
           </article>;
         })}</div> : <EmptyState title="还没有存钱目标" description="从一笔小小的存款开始。" action={<button className="button button--primary" onClick={() => setModal({ kind: "savingTarget" })}>新建目标</button>} />}
@@ -687,18 +721,24 @@ export default function SmallPlanetApp() {
   }
 
   function renderCountdown() {
-    const sorted = countdowns.slice().sort((left, right) => Number(right.isPinned) - Number(left.isPinned) || daysUntil(effectiveCountdownDate(left.targetDate, left.repeatYearly)) - daysUntil(effectiveCountdownDate(right.targetDate, right.repeatYearly)));
+    const sorted = countdowns.slice().sort((left, right) => {
+      const leftDays = daysUntil(effectiveCountdownDate(left.targetDate, left.repeatYearly));
+      const rightDays = daysUntil(effectiveCountdownDate(right.targetDate, right.repeatYearly));
+      return Number(right.isPinned) - Number(left.isPinned)
+        || Number(leftDays < 0) - Number(rightDays < 0)
+        || (leftDays < 0 && rightDays < 0 ? rightDays - leftDays : leftDays - rightDays);
+    });
     return <section className="page-section">
       <PageTitle eyebrow="COUNTING DOWN" title="倒计时" description="把期待放在眼前，日子就有了方向。" action={<button className="button button--primary" onClick={() => setModal({ kind: "countdown" })}><Plus />新倒计时</button>} />
       <div className="countdown-grid">{sorted.map((item) => {
         const displayDate = effectiveCountdownDate(item.targetDate, item.repeatYearly);
         const remaining = daysUntil(displayDate);
-        const urgency = remaining <= 1 ? "urgent" : remaining <= 7 ? "soon" : remaining <= 30 ? "near" : "normal";
+        const urgency = remaining < 0 ? "past" : remaining <= 1 ? "urgent" : remaining <= 7 ? "soon" : remaining <= 30 ? "near" : "normal";
         return <article className={`countdown-card countdown-card--${urgency}`} key={item.id}>
           <div className="card-heading"><Clock3 />{item.isPinned ? "置顶事件" : "倒计时"}</div>
-          <strong>{Math.max(remaining, 0)}<small>天</small></strong>
+          <strong>{Math.abs(remaining)}<small>天</small></strong>
           <h3>{item.title}</h3><p>{formatDate(displayDate)}{item.targetTime ? ` · ${item.targetTime}` : ""}</p>
-          <div className="record-actions"><span>{item.repeatYearly ? "每年重复" : urgency === "near" ? "即将到来" : "一次性"}</span><button onClick={() => window.confirm("移入回收站？") && void softDelete("countdowns", item.id)}><Trash2 />删除</button></div>
+          <div className="record-actions"><span>{remaining < 0 ? "已经过去" : item.repeatYearly ? "每年重复" : urgency === "near" ? "即将到来" : "一次性"}</span><button onClick={() => setModal({ kind: "countdown", id: item.id })}><PenLine />修改</button><button onClick={() => window.confirm("移入回收站？") && void softDelete("countdowns", item.id)}><Trash2 />删除</button></div>
         </article>;
       })}</div>
       {!sorted.length && <EmptyState title="还没有倒计时" description="添加一个值得期待的日子。" />}
@@ -724,7 +764,12 @@ export default function SmallPlanetApp() {
   function renderFandom() {
     return <section className="page-section">
       <PageTitle eyebrow="STAR TIMELINE" title="追星" description="行程、预算与相遇，放在同一条时间线上。" action={<button className="button button--primary" onClick={() => setModal({ kind: "fandomEvent" })}><Plus />新行程</button>} />
-      <div className="toolbar"><div className="segmented"><button className={fandomMode === "timeline" ? "is-active" : ""} onClick={() => setFandomMode("timeline")}><List />时间线</button><button className={fandomMode === "calendar" ? "is-active" : ""} onClick={() => setFandomMode("calendar")}><CalendarRange />月历</button></div><button className="text-button" onClick={() => setModal({ kind: "artist", id: data!.artists[0]?.id })}><PenLine />编辑艺人资料</button></div>
+      <div className="section-heading"><h2><Star />艺人档案</h2><button className="text-button" onClick={() => setModal({ kind: "artist" })}><Plus />新增艺人</button></div>
+      {artists.length ? <div className="artist-grid">{artists.map((artist) => <article className="artist-card" key={artist.id}>
+        <div className="artist-card__avatar">{artist.avatarImageId ? <AssetImage id={artist.avatarImageId} alt={`${artist.name}头像`} /> : <Star />}</div>
+        <div className="artist-card__body"><span className="tag">{artist.groupName || "个人艺人"}</span><h3>{artist.name}</h3>{artist.nickname && <p className="artist-card__nickname">{artist.nickname}</p>}<p>生日 · {formatDate(artist.birthday)}</p>{artist.debutDate && <p>出道 · {formatDate(artist.debutDate)}</p>}{artist.note && <small>{artist.note}</small>}<div className="record-actions"><button onClick={() => setModal({ kind: "artist", id: artist.id })}><PenLine />编辑</button><button onClick={() => window.confirm("删除这张艺人档案？关联行程会保留。") && void softDelete("artists", artist.id)}><Trash2 />删除</button></div></div>
+      </article>)}</div> : <EmptyState title="还没有艺人档案" description="可以添加多位艺人，并分别设置头像与纪念日。" action={<button className="button button--primary" onClick={() => setModal({ kind: "artist" })}>新增艺人</button>} />}
+      <div className="toolbar fandom-toolbar"><div className="segmented"><button className={fandomMode === "timeline" ? "is-active" : ""} onClick={() => setFandomMode("timeline")}><List />时间线</button><button className={fandomMode === "calendar" ? "is-active" : ""} onClick={() => setFandomMode("calendar")}><CalendarRange />月历</button></div></div>
       {fandomMode === "timeline" ? <div className="timeline">{events.slice().sort((a, b) => a.startDate.localeCompare(b.startDate)).map((event) => {
         const artistNames = event.artistIds.map((id) => data!.artists.find((artist) => artist.id === id)?.name).filter(Boolean).join("、");
         const eventExpenses = expenses.filter((expense) => expense.eventId === event.id);
@@ -754,7 +799,13 @@ export default function SmallPlanetApp() {
     return <section className="page-section">
       <PageTitle eyebrow="LITTLE TOOLS" title="扩展" description="读书与习惯，是生活缓慢长大的方式。" />
       <div className="section-heading"><h2><BookOpen />读书</h2><button className="text-button" onClick={() => setModal({ kind: "book" })}><Plus />添加书籍</button></div>
-      <div className="book-grid">{books.map((book) => { const progress = book.progressMode === "pages" && book.totalPages ? (book.currentPage / book.totalPages) * 100 : book.percent; return <article className="book-card" key={book.id}><div className="book-cover"><BookOpen /></div><div><span className="tag">{book.status === "finished" ? "已读完" : book.status === "reading" ? "在读" : "想读"}</span><h3>{book.title}</h3><Progress value={progress} /><small>{Math.round(progress)}% · {book.note}</small><div className="record-actions"><button onClick={() => { const nextProgress = Math.min(progress + 10, 100); void commit({ ...data!, books: data!.books.map((item) => item.id === book.id ? { ...item, percent: item.progressMode === "percent" ? nextProgress : item.percent, currentPage: item.progressMode === "pages" ? Math.min(item.currentPage + Math.ceil(item.totalPages * 0.1), item.totalPages) : item.currentPage, status: nextProgress >= 100 ? "finished" : "reading", finishedAt: nextProgress >= 100 ? isoNow() : null, updatedAt: isoNow() } : item) }, "阅读进度已更新"); }}><Plus />进度</button><button onClick={() => void softDelete("books", book.id)}><Trash2 />删除</button></div></div></article>; })}</div>
+      <div className="book-grid">{books.map((book) => {
+        const progress = book.progressMode === "pages" && book.totalPages ? (book.currentPage / book.totalPages) * 100 : book.percent;
+        return <article className="book-card" key={book.id}>
+          <div className="book-cover">{book.coverImageId ? <AssetImage id={book.coverImageId} alt={`${book.title}封面`} /> : <BookOpen />}</div>
+          <div><span className="tag">{book.status === "finished" ? "已读完" : book.status === "reading" ? "在读" : "想读"}</span><h3>{book.title}</h3><Progress value={progress} /><small>{Math.round(progress)}% · {book.note}</small><div className="record-actions"><button onClick={() => { const nextProgress = Math.min(progress + 10, 100); void commit({ ...data!, books: data!.books.map((item) => item.id === book.id ? { ...item, percent: item.progressMode === "percent" ? nextProgress : item.percent, currentPage: item.progressMode === "pages" ? Math.min(item.currentPage + Math.ceil(item.totalPages * 0.1), item.totalPages) : item.currentPage, status: nextProgress >= 100 ? "finished" : "reading", finishedAt: nextProgress >= 100 ? isoNow() : null, updatedAt: isoNow() } : item) }, "阅读进度已更新"); }}><Plus />进度</button><button onClick={() => setModal({ kind: "book", id: book.id })}><PenLine />编辑</button><button onClick={() => void softDelete("books", book.id)}><Trash2 />删除</button></div></div>
+        </article>;
+      })}</div>
       <div className="section-heading"><h2><Flame />习惯打卡</h2><button className="text-button" onClick={() => setModal({ kind: "habit" })}><Plus />新习惯</button></div>
       <div className="habit-list">{habits.map((habit) => { const checked = active(data!.habitCheckins).some((item) => item.habitId === habit.id && item.scheduledDate === today()); const schedule = habit.scheduleType === "daily" ? "每日" : habit.scheduleType === "weekdays" ? `每周${habit.weekdays.map((day) => "日一二三四五六"[day]).join("、")}` : habit.scheduleType === "weeklyCount" ? `每周 ${habit.targetCount} 次` : `每月 ${habit.targetCount} 次`; return <article className="habit-row" key={habit.id}><button className={`check-button ${checked ? "is-checked" : ""}`} aria-label={checked ? "今天已打卡" : "立即打卡"} onClick={() => void toggleHabit(habit, checked)}>{checked ? <Check /> : <Plus />}</button><div><h3>{habit.name}</h3><p>{schedule}</p></div><span className="streak"><Flame />{habitStreak(habit.id)} 天</span></article>; })}</div>
     </section>;
@@ -782,7 +833,14 @@ export default function SmallPlanetApp() {
 
   function renderTrash() {
     const rows = collectTrash(data!);
-    return <section className="page-section"><PageTitle eyebrow="RECYCLE BIN" title="回收站" description="删除内容保留 30 天，永久清理前 3 天会提醒。" />{rows.length ? <div className="compact-list">{rows.map((row) => <div className="compact-row" key={`${row.collection}-${row.record.id}`}><Trash2 /><div><strong>{row.label}</strong><small>还剩 {daysInTrash(row.record)} 天永久删除</small></div><button className="text-button" onClick={() => void restoreRecord(row.collection, row.record.id)}><RotateCcw />恢复</button><button className="text-button danger" onClick={() => window.confirm("永久删除后无法恢复，确定吗？") && void purgeRecord(row.collection, row.record.id)}><X />彻底删除</button></div>)}</div> : <EmptyState title="回收站是空的" description="删除的内容会在这里保留 30 天。" />}</section>;
+    const availableKeys = rows.map((row) => trashKey(row.collection, row.record.id));
+    const selectedKeys = selectedTrash.filter((key) => availableKeys.includes(key));
+    const selectedRows = rows.filter((row) => selectedKeys.includes(trashKey(row.collection, row.record.id)));
+    const allSelected = rows.length > 0 && selectedRows.length === rows.length;
+    return <section className="page-section"><PageTitle eyebrow="RECYCLE BIN" title="回收站" description="删除内容保留 30 天，永久清理前 3 天会提醒。" />{rows.length ? <>
+      <div className="trash-toolbar"><button className="button button--ghost" onClick={() => setSelectedTrash(allSelected ? [] : availableKeys)}>{allSelected ? "取消全选" : "全选"}</button><span>已选择 {selectedRows.length} 项</span><div><button className="button button--ghost" disabled={!selectedRows.length} onClick={() => void restoreMany(selectedRows)}><RotateCcw />批量恢复</button><button className="button button--primary" disabled={!selectedRows.length} onClick={() => window.confirm(`永久删除选中的 ${selectedRows.length} 项？此操作无法恢复。`) && void purgeMany(selectedRows)}><Trash2 />批量彻底删除</button></div></div>
+      <div className="compact-list">{rows.map((row) => { const key = trashKey(row.collection, row.record.id); return <div className="compact-row trash-row" key={key}><input aria-label={`选择${row.label}`} type="checkbox" checked={selectedKeys.includes(key)} onChange={(event) => setSelectedTrash((current) => event.currentTarget.checked ? [...new Set([...current, key])] : current.filter((item) => item !== key))} /><Trash2 /><div><strong>{row.label}</strong><small>还剩 {daysInTrash(row.record)} 天永久删除</small></div><button className="text-button" onClick={() => void restoreRecord(row.collection, row.record.id)}><RotateCcw />恢复</button><button className="text-button danger" onClick={() => window.confirm("永久删除后无法恢复，确定吗？") && void purgeRecord(row.collection, row.record.id)}><X />彻底删除</button></div>; })}</div>
+    </> : <EmptyState title="回收站是空的" description="删除的内容会在这里保留 30 天。" />}</section>;
   }
 
   function renderSettings() {
@@ -854,23 +912,90 @@ export default function SmallPlanetApp() {
     }
   }
 
+  async function restoreMany(rows: TrashRow[]) {
+    if (!data || !rows.length) return;
+    const selected = new Set(rows.map((row) => trashKey(row.collection, row.record.id)));
+    const restoredTargetIds = new Set(rows.filter((row) => row.collection === "savingsTargets").map((row) => row.record.id));
+    const restoredArtistIds = new Set(rows.filter((row) => row.collection === "artists").map((row) => row.record.id));
+    const now = isoNow();
+    const next = { ...data } as AppData;
+    (Object.keys(data) as Array<keyof AppData>).forEach((key) => {
+      if (key === "schemaVersion") return;
+      const collection = key as RecordCollection;
+      const records = data[collection] as unknown as BaseRecord[];
+      (next[collection] as unknown) = records.map((record) => selected.has(trashKey(collection, record.id)) ? { ...record, deletedAt: null, updatedAt: now } : record);
+    });
+    next.savingsTransactions = next.savingsTransactions.map((transaction) => restoredTargetIds.has(transaction.targetId) ? { ...transaction, deletedAt: null, updatedAt: now } : transaction);
+    next.countdowns = next.countdowns.map((countdown) => countdown.sourceId && restoredArtistIds.has(countdown.sourceId) ? { ...countdown, deletedAt: null, status: "active", updatedAt: now } : countdown);
+    rows.forEach((row) => {
+      if (row.collection === "fandomExpenses") {
+        const expense = data.fandomExpenses.find((item) => item.id === row.record.id);
+        if (expense?.savingsTransactionId) next.savingsTransactions = next.savingsTransactions.map((item) => item.id === expense.savingsTransactionId ? { ...item, deletedAt: null, updatedAt: now } : item);
+      }
+      if (row.collection === "savingsTransactions") {
+        const transaction = data.savingsTransactions.find((item) => item.id === row.record.id);
+        if (transaction?.sourceType === "fandomExpense" && transaction.sourceId) next.fandomExpenses = next.fandomExpenses.map((item) => item.id === transaction.sourceId ? { ...item, deletedAt: null, updatedAt: now } : item);
+      }
+    });
+    const saved = await commit(next, `已恢复 ${rows.length} 项`);
+    if (saved) setSelectedTrash([]);
+  }
+
+  async function purgeMany(rows: TrashRow[]) {
+    if (!data || !rows.length) return;
+    const selected = new Set(rows.map((row) => trashKey(row.collection, row.record.id)));
+    const removedTransactionIds = new Set<string>();
+    const removedExpenseIds = new Set<string>();
+    const removedTargetIds = new Set<string>();
+    const removedArtistIds = new Set<string>();
+    const assetIds = new Set<string>();
+
+    rows.forEach((row) => {
+      if (row.collection === "savingsTargets") removedTargetIds.add(row.record.id);
+      if (row.collection === "artists") removedArtistIds.add(row.record.id);
+      if (row.collection === "fandomExpenses") {
+        const expense = data.fandomExpenses.find((item) => item.id === row.record.id);
+        if (expense?.savingsTransactionId) removedTransactionIds.add(expense.savingsTransactionId);
+      }
+      if (row.collection === "savingsTransactions") {
+        const transaction = data.savingsTransactions.find((item) => item.id === row.record.id);
+        if (transaction?.sourceType === "fandomExpense" && transaction.sourceId) removedExpenseIds.add(transaction.sourceId);
+      }
+      if (row.collection === "diaryEntries") {
+        const diary = data.diaryEntries.find((item) => item.id === row.record.id);
+        diary?.imageIds.forEach((id) => assetIds.add(id));
+      }
+      if (row.collection === "books") {
+        const book = data.books.find((item) => item.id === row.record.id);
+        if (book?.coverImageId) assetIds.add(book.coverImageId);
+      }
+      if (row.collection === "artists") {
+        const artist = data.artists.find((item) => item.id === row.record.id);
+        if (artist?.avatarImageId) assetIds.add(artist.avatarImageId);
+      }
+    });
+
+    const next = { ...data } as AppData;
+    (Object.keys(data) as Array<keyof AppData>).forEach((key) => {
+      if (key === "schemaVersion") return;
+      const collection = key as RecordCollection;
+      const records = data[collection] as unknown as BaseRecord[];
+      (next[collection] as unknown) = records.filter((record) => !selected.has(trashKey(collection, record.id)));
+    });
+    next.savingsTransactions = next.savingsTransactions.filter((item) => !removedTargetIds.has(item.targetId) && !removedTransactionIds.has(item.id));
+    next.fandomExpenses = next.fandomExpenses.filter((item) => !removedExpenseIds.has(item.id));
+    next.countdowns = next.countdowns.filter((item) => !item.sourceId || !removedArtistIds.has(item.sourceId));
+    const saved = await commit(next, `已永久删除 ${rows.length} 项`);
+    if (!saved) return;
+    await Promise.all([...assetIds].map((id) => deleteAsset(id)));
+    setSelectedTrash([]);
+  }
+
   async function purgeRecord(collection: RecordCollection, id: string) {
     if (!data) return;
-    const records = data[collection] as unknown as BaseRecord[];
-    const next = { ...data, [collection]: records.filter((record) => record.id !== id) } as AppData;
-    if (collection === "fandomExpenses") {
-      const expense = data.fandomExpenses.find((item) => item.id === id);
-      if (expense?.savingsTransactionId) {
-        next.savingsTransactions = next.savingsTransactions.filter((item) => item.id !== expense.savingsTransactionId);
-      }
-    }
-    if (collection === "savingsTransactions") {
-      const transaction = data.savingsTransactions.find((item) => item.id === id);
-      if (transaction?.sourceType === "fandomExpense" && transaction.sourceId) {
-        next.fandomExpenses = next.fandomExpenses.filter((item) => item.id !== transaction.sourceId);
-      }
-    }
-    await commit(next, "已永久删除");
+    const record = (data[collection] as unknown as BaseRecord[]).find((item) => item.id === id);
+    if (!record) return;
+    await purgeMany([{ collection, record, label: "记录" }]);
   }
 
   const pageLabel = navItems.find((item) => item.id === view)?.label ?? "小小星球";
@@ -979,9 +1104,10 @@ function AppModal(props: ModalProps) {
         const record = { ...baseRecord("transaction"), targetId: target.id, direction, amount, currency: target.currency, occurredAt: now, note: field(form, "note"), sourceType: "manual" as const, sourceId: null };
         next = { ...data, savingsTransactions: [...data.savingsTransactions, record] };
       } else if (modal.kind === "countdown") {
-        const record: CountdownEvent = { ...baseRecord("countdown"), title: field(form, "title"), targetDate: field(form, "targetDate"), targetTime: field(form, "targetTime") || null, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, note: field(form, "note"), isPinned: form.get("isPinned") === "on", repeatYearly: form.get("repeatYearly") === "on", status: "active", sourceType: "manual", sourceId: null };
+        const existing = data.countdowns.find((item) => item.id === modal.id);
+        const record: CountdownEvent = { ...(existing ?? baseRecord("countdown")), title: field(form, "title"), targetDate: field(form, "targetDate"), targetTime: field(form, "targetTime") || null, timeZone: existing?.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone, note: field(form, "note"), isPinned: form.get("isPinned") === "on", repeatYearly: form.get("repeatYearly") === "on", status: "active", sourceType: existing?.sourceType ?? "manual", sourceId: existing?.sourceId ?? null, updatedAt: now };
         if (!record.title || !record.targetDate) throw new Error("请填写名称和目标日期");
-        next = { ...data, countdowns: [...data.countdowns, record] };
+        next = { ...data, countdowns: existing ? data.countdowns.map((item) => item.id === existing.id ? record : item) : [...data.countdowns, record] };
       } else if (modal.kind === "monthlyGoal") {
         const progressType = field(form, "progressType") as MonthlyGoal["progressType"];
         const record: MonthlyGoal = { ...baseRecord("monthly"), month: field(form, "month"), name: field(form, "name"), category: field(form, "category") || "生活", progressType, targetValue: progressType === "checkbox" ? 1 : progressType === "percent" ? 100 : numberField(form, "targetValue"), currentValue: 0, unit: field(form, "unit") || (progressType === "count" ? "次" : "%"), deadline: field(form, "deadline") };
@@ -992,7 +1118,7 @@ function AppModal(props: ModalProps) {
         const record = { ...(existing ?? baseRecord("review")), month: monthNow(), achievements: field(form, "achievements"), happiestMoment: field(form, "happiestMoment"), regrets: field(form, "regrets"), financeSummary: field(form, "financeSummary"), nextMonthPlan: field(form, "nextMonthPlan"), updatedAt: now };
         next = { ...data, monthlyReviews: existing ? data.monthlyReviews.map((item) => item.id === existing.id ? record : item) : [...data.monthlyReviews, record] };
       } else if (modal.kind === "fandomEvent") {
-        const record: FandomEvent = { ...baseRecord("event"), title: field(form, "title"), artistIds: data.artists.length ? [data.artists[0].id] : [], eventType: field(form, "eventType"), startDate: field(form, "startDate"), startTime: field(form, "startTime") || null, location: field(form, "location"), note: field(form, "note"), budgetAmount: numberField(form, "budgetAmount"), currency: field(form, "currency") as Currency, savingsTargetId: field(form, "savingsTargetId") || null, status: "upcoming" };
+        const record: FandomEvent = { ...baseRecord("event"), title: field(form, "title"), artistIds: form.getAll("artistIds").map(String), eventType: field(form, "eventType"), startDate: field(form, "startDate"), startTime: field(form, "startTime") || null, location: field(form, "location"), note: field(form, "note"), budgetAmount: numberField(form, "budgetAmount"), currency: field(form, "currency") as Currency, savingsTargetId: field(form, "savingsTargetId") || null, status: "upcoming" };
         if (!record.title || !record.startDate || !record.eventType) throw new Error("请填写活动名称、类型和日期");
         next = { ...data, fandomEvents: [...data.fandomEvents, record] };
       } else if (modal.kind === "fandomExpense") {
@@ -1018,19 +1144,32 @@ function AppModal(props: ModalProps) {
         next = { ...data, savingsTransactions, fandomExpenses: [...data.fandomExpenses, expense] };
       } else if (modal.kind === "diary") {
         const diaryBase = baseRecord("diary");
+        const occurredDate = field(form, "occurredDate") || today();
+        if (occurredDate > today()) throw new Error("生活日记不能填写未来日期");
         const files = form.getAll("images").filter((item): item is File => item instanceof File && item.size > 0).slice(0, 9);
         const assets: ImageAsset[] = [];
         for (let index = 0; index < files.length; index += 1) assets.push(await compressImage(files[index], "diary", diaryBase.id, index === 0 ? "cover" : "content", index));
-        const record: DiaryEntry = { ...diaryBase, occurredAt: now, content: field(form, "content"), tags: field(form, "tags").split(/[,，]/).map((tag) => tag.trim()).filter(Boolean), mood: field(form, "mood") as DiaryEntry["mood"], weather: (field(form, "weather") || null) as DiaryEntry["weather"], imageIds: assets.map((asset) => asset.id), coverImageId: assets[0]?.id ?? null };
+        const record: DiaryEntry = { ...diaryBase, occurredAt: occurredDate === today() ? now : `${occurredDate}T12:00:00`, content: field(form, "content"), tags: field(form, "tags").split(/[,，]/).map((tag) => tag.trim()).filter(Boolean), mood: field(form, "mood") as DiaryEntry["mood"], weather: (field(form, "weather") || null) as DiaryEntry["weather"], imageIds: assets.map((asset) => asset.id), coverImageId: assets[0]?.id ?? null };
         if (!record.content && !assets.length) throw new Error("文字和图片至少填写一项");
         next = { ...data, diaryEntries: [record, ...data.diaryEntries] };
         await saveDataAndAssets(next, assets);
         onDataChange(next); setToast("日记已保存"); setModal(null); return;
       } else if (modal.kind === "book") {
+        const existing = data.books.find((item) => item.id === modal.id);
         const mode = field(form, "progressMode") as Book["progressMode"];
-        const record: Book = { ...baseRecord("book"), title: field(form, "title"), status: "reading", progressMode: mode, totalPages: numberField(form, "totalPages"), currentPage: 0, percent: 0, note: field(form, "note"), finishedAt: null };
+        const base = existing ?? baseRecord("book");
+        const coverFile = form.get("cover");
+        const coverAsset = coverFile instanceof File && coverFile.size > 0
+          ? await compressImage(coverFile, "book", base.id, "cover", 0)
+          : null;
+        const record: Book = { ...base, title: field(form, "title"), coverImageId: coverAsset?.id ?? existing?.coverImageId ?? null, status: existing?.status ?? "reading", progressMode: mode, totalPages: numberField(form, "totalPages"), currentPage: existing?.currentPage ?? 0, percent: existing?.percent ?? 0, note: field(form, "note"), finishedAt: existing?.finishedAt ?? null, updatedAt: now };
         if (!record.title || (mode === "pages" && record.totalPages <= 0)) throw new Error("请填写书名和有效进度信息");
-        next = { ...data, books: [...data.books, record] };
+        next = { ...data, books: existing ? data.books.map((item) => item.id === existing.id ? record : item) : [...data.books, record] };
+        if (coverAsset) {
+          await saveDataAndAssets(next, [coverAsset]);
+          if (existing?.coverImageId) await deleteAsset(existing.coverImageId);
+          onDataChange(next); setToast(existing ? "书籍与封面已更新" : "书籍已添加"); setModal(null); return;
+        }
       } else if (modal.kind === "habit") {
         const record: Habit = { ...baseRecord("habit"), name: field(form, "name"), scheduleType: field(form, "scheduleType") as Habit["scheduleType"], weekdays: form.getAll("weekdays").map((value) => Number(value)), targetCount: Math.max(1, numberField(form, "targetCount")), startDate: today(), status: "active" };
         if (!record.name) throw new Error("请填写习惯名称");
@@ -1041,25 +1180,38 @@ function AppModal(props: ModalProps) {
         if (!record.title || !record.category) throw new Error("请填写心愿和类别");
         next = { ...data, wishes: [...data.wishes, record] };
       } else if (modal.kind === "artist") {
-        const existing = data.artists.find((item) => item.id === modal.id) ?? data.artists[0];
-        if (!existing) throw new Error("首次艺人资料需要由初始化数据导入");
+        const existing = data.artists.find((item) => item.id === modal.id);
+        const base = existing ?? baseRecord("artist");
         const birthday = field(form, "birthday");
         const artistName = field(form, "name");
         const debutDate = field(form, "debutDate") || null;
         if (!artistName || !birthday) throw new Error("姓名和完整生日必须填写");
+        const avatarFile = form.get("avatar");
+        const avatarAsset = avatarFile instanceof File && avatarFile.size > 0
+          ? await compressImage(avatarFile, "artist", base.id, "avatar", 0)
+          : null;
+        const record: Artist = { ...base, name: artistName, avatarImageId: avatarAsset?.id ?? existing?.avatarImageId ?? null, nickname: field(form, "nickname"), groupName: field(form, "groupName"), birthday, debutDate, note: field(form, "note"), updatedAt: now };
         let syncedCountdowns = [...data.countdowns];
         const syncAnnualCountdown = (sourceType: "artistBirthday" | "artistDebut", targetDate: string | null, title: string, enabled: boolean) => {
-          if (!targetDate || !enabled) return;
-          const found = syncedCountdowns.find((item) => item.sourceType === sourceType && item.sourceId === existing.id);
+          const found = syncedCountdowns.find((item) => item.sourceType === sourceType && item.sourceId === base.id);
+          if (!targetDate || !enabled) {
+            if (found) syncedCountdowns = syncedCountdowns.map((item) => item.id === found.id ? { ...item, deletedAt: now, status: "ended", updatedAt: now } : item);
+            return;
+          }
           if (found) {
             syncedCountdowns = syncedCountdowns.map((item) => item.id === found.id ? { ...item, title, targetDate, repeatYearly: true, status: "active", deletedAt: null, updatedAt: now } : item);
           } else {
-            syncedCountdowns.push({ ...baseRecord("countdown"), title, targetDate, targetTime: null, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, note: "由艺人资料生成", isPinned: false, repeatYearly: true, status: "active", sourceType, sourceId: existing.id });
+            syncedCountdowns.push({ ...baseRecord("countdown"), title, targetDate, targetTime: null, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, note: "由艺人资料生成", isPinned: false, repeatYearly: true, status: "active", sourceType, sourceId: base.id });
           }
         };
         syncAnnualCountdown("artistBirthday", birthday, `${artistName}生日`, form.get("syncBirthday") === "on");
         syncAnnualCountdown("artistDebut", debutDate, `${artistName}出道纪念日`, form.get("syncDebut") === "on");
-        next = { ...data, countdowns: syncedCountdowns, artists: data.artists.map((item) => item.id === existing.id ? { ...item, name: artistName, nickname: field(form, "nickname"), groupName: field(form, "groupName"), birthday, debutDate, note: field(form, "note"), updatedAt: now } : item) };
+        next = { ...data, countdowns: syncedCountdowns, artists: existing ? data.artists.map((item) => item.id === existing.id ? record : item) : [...data.artists, record] };
+        if (avatarAsset) {
+          await saveDataAndAssets(next, [avatarAsset]);
+          if (existing?.avatarImageId) await deleteAsset(existing.avatarImageId);
+          onDataChange(next); setToast(existing ? "艺人档案与头像已更新" : "艺人档案已添加"); setModal(null); return;
+        }
       }
       const saved = await commit(next, "已保存");
       if (saved) setModal(null);
@@ -1068,23 +1220,23 @@ function AppModal(props: ModalProps) {
     }
   };
 
-  const titleMap: Record<ModalKind, string> = { quick: "快速新增", savingTarget: "新建存钱目标", transaction: "记录存入／取出", countdown: "新建倒计时", monthlyGoal: "新建月度目标", monthlyReview: "月底复盘", fandomEvent: "新建追星行程", fandomExpense: "记录追星花费", diary: "写生活日记", book: "添加书籍", habit: "新建习惯", wish: "新建心愿", artist: "编辑艺人资料", layout: "编辑首页", backup: "导出加密备份", import: "导入备份" };
+  const titleMap: Record<ModalKind, string> = { quick: "快速新增", savingTarget: "新建存钱目标", transaction: "记录存入／取出", countdown: modal.id ? "编辑倒计时" : "新建倒计时", monthlyGoal: "新建月度目标", monthlyReview: "月底复盘", fandomEvent: "新建追星行程", fandomExpense: "记录追星花费", diary: "写生活日记", book: modal.id ? "编辑书籍" : "添加书籍", habit: "新建习惯", wish: "新建心愿", artist: modal.id ? "编辑艺人档案" : "新增艺人档案", layout: "编辑首页", backup: "导出加密备份", import: "导入备份" };
 
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && close()}><div className="modal" role="dialog" aria-modal="true" aria-label={titleMap[modal.kind]}><div className="modal__head"><div><p className="eyebrow">SMALL PLANET</p><h2>{titleMap[modal.kind]}</h2></div><button className="icon-button" onClick={close} aria-label="关闭"><X /></button></div>{modal.kind === "quick" ? <QuickChooser choose={(kind) => setModal({ kind })} /> : modal.kind === "layout" ? <LayoutEditor preferences={preferences} onChange={updatePreferences} close={close} /> : modal.kind === "backup" ? <BackupForm data={data} preferences={preferences} security={security} onDone={(date) => { updatePreferences({ lastBackupAt: date }); setToast("加密备份已导出"); close(); }} setError={setError} /> : modal.kind === "import" ? <ImportForm currentData={data} preferences={preferences} security={security} onImported={(nextData, nextPrefs, nextSecurity) => { onDataChange(nextData); updatePreferences(nextPrefs); onSecurityChange(nextSecurity); setToast("备份导入完成"); close(); }} setError={setError} /> : <form className="modal-form" onSubmit={submit}>{renderFields()}<div className="modal-actions"><button type="button" className="button button--ghost" onClick={close}>取消</button><button className="button button--primary" type="submit" disabled={busy}><Save />{busy ? "保存中…" : "保存"}</button></div></form>}</div></div>;
 
   function renderFields() {
     if (modal.kind === "savingTarget") return <><label>目标名称<input name="name" placeholder="例如：追星基金" required /></label><div className="form-grid"><label>目标金额<input name="targetAmount" type="number" min="1" step="0.01" required /></label><label>币种<select name="currency" defaultValue="CNY"><option value="CNY">人民币 CNY</option><option value="KRW">韩元 KRW</option><option value="JPY">日元 JPY</option><option value="USD">美元 USD</option></select></label></div><label>截止日期（选填）<input name="deadline" type="date" /></label><label>备注<textarea name="note" /></label></>;
     if (modal.kind === "transaction") return <><label>存钱目标<select name="targetId" defaultValue={modal.id ?? targets[0]?.id}>{targets.map((target) => <option value={target.id} key={target.id}>{target.name} · {currencySymbols[target.currency]}</option>)}</select></label><div className="form-grid"><label>类型<select name="direction"><option value="deposit">存入</option><option value="withdraw">取出</option></select></label><label>金额<input name="amount" type="number" min="0.01" step="0.01" required /></label></div><label>备注<textarea name="note" /></label></>;
-    if (modal.kind === "countdown") return <><label>事件名称<input name="title" required /></label><div className="form-grid"><label>目标日期<input name="targetDate" type="date" required /></label><label>具体时间（选填）<input name="targetTime" type="time" /></label></div><div className="check-row"><label><input name="isPinned" type="checkbox" />置顶</label><label><input name="repeatYearly" type="checkbox" />每年重复</label></div><label>备注<textarea name="note" /></label></>;
+    if (modal.kind === "countdown") { const countdown = data.countdowns.find((item) => item.id === modal.id); return <><label>事件名称<input name="title" defaultValue={countdown?.title} required /></label><div className="form-grid"><label>目标日期<input name="targetDate" type="date" defaultValue={countdown?.targetDate} required /></label><label>具体时间（选填）<input name="targetTime" type="time" defaultValue={countdown?.targetTime ?? ""} /></label></div><div className="check-row"><label><input name="isPinned" type="checkbox" defaultChecked={countdown?.isPinned} />置顶</label><label><input name="repeatYearly" type="checkbox" defaultChecked={countdown?.repeatYearly} />每年重复</label></div><label>备注<textarea name="note" defaultValue={countdown?.note} /></label></>; }
     if (modal.kind === "monthlyGoal") return <><label>目标名称<input name="name" required /></label><div className="form-grid"><label>所属月份<input name="month" type="month" defaultValue={monthNow()} required /></label><label>类别<input name="category" defaultValue="生活" /></label><label>进度方式<select name="progressType"><option value="checkbox">完成／未完成</option><option value="percent">百分比</option><option value="count">次数累计</option><option value="value">数值累计</option></select></label><label>目标值<input name="targetValue" type="number" defaultValue="10" min="1" /></label><label>单位<input name="unit" defaultValue="次" /></label><label>截止日期<input name="deadline" type="date" required /></label></div></>;
     if (modal.kind === "monthlyReview") { const review = active(data.monthlyReviews).find((item) => item.id === modal.id); return <>{[["achievements", "本月完成的事"], ["happiestMoment", "本月最开心的事"], ["regrets", "本月遗憾"], ["financeSummary", "收支概况"], ["nextMonthPlan", "下个月计划"]].map(([name, label]) => <label key={name}>{label}<textarea name={name} defaultValue={review?.[name as keyof typeof review] as string ?? ""} /></label>)}</>; }
-    if (modal.kind === "fandomEvent") return <><label>活动名称<input name="title" required /></label><div className="form-grid"><label>类型<select name="eventType"><option>演唱会</option><option>签售</option><option>直播</option><option>发售</option><option>其他</option></select></label><label>日期<input name="startDate" type="date" required /></label><label>时间<input name="startTime" type="time" /></label><label>地点<input name="location" placeholder="线上活动可留空" /></label><label>预算<input name="budgetAmount" type="number" min="0" step="0.01" defaultValue="0" /></label><label>币种<select name="currency"><option value="CNY">人民币</option><option value="KRW">韩元</option><option value="JPY">日元</option><option value="USD">美元</option></select></label></div><label>关联存钱目标<select name="savingsTargetId"><option value="">不关联</option>{targets.map((target) => <option value={target.id} key={target.id}>{target.name} · {target.currency}</option>)}</select></label><label>备注<textarea name="note" /></label></>;
+    if (modal.kind === "fandomEvent") return <><label>活动名称<input name="title" required /></label>{active(data.artists).length > 0 && <fieldset className="weekday-field"><legend>关联艺人（可多选）</legend>{active(data.artists).map((artist) => <label key={artist.id}><input type="checkbox" name="artistIds" value={artist.id} />{artist.name}</label>)}</fieldset>}<div className="form-grid"><label>类型<select name="eventType"><option>演唱会</option><option>签售</option><option>直播</option><option>发售</option><option>其他</option></select></label><label>日期<input name="startDate" type="date" required /></label><label>时间<input name="startTime" type="time" /></label><label>地点<input name="location" placeholder="线上活动可留空" /></label><label>预算<input name="budgetAmount" type="number" min="0" step="0.01" defaultValue="0" /></label><label>币种<select name="currency"><option value="CNY">人民币</option><option value="KRW">韩元</option><option value="JPY">日元</option><option value="USD">美元</option></select></label></div><label>关联存钱目标<select name="savingsTargetId"><option value="">不关联</option>{targets.map((target) => <option value={target.id} key={target.id}>{target.name} · {target.currency}</option>)}</select></label><label>备注<textarea name="note" /></label></>;
     if (modal.kind === "fandomExpense") return <><label>活动<select name="eventId" defaultValue={modal.id}>{events.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select></label><div className="form-grid"><label>类别<select name="category"><option value="ticket">门票</option><option value="album">专辑</option><option value="merch">周边</option><option value="transport">交通</option><option value="hotel">住宿</option><option value="other">其他</option></select></label><label>金额<input name="amount" type="number" min="0.01" step="0.01" required /></label></div><label className="checkbox-card"><input name="deduct" type="checkbox" />同时从关联基金取出（保存前会再次确认）</label><label>基金<select name="savingsTargetId"><option value="">使用活动关联基金</option>{targets.map((target) => <option value={target.id} key={target.id}>{target.name} · {target.currency}</option>)}</select></label><label>备注<textarea name="note" /></label></>;
-    if (modal.kind === "diary") return <><label>今天想记什么<textarea name="content" rows={5} /></label><div className="form-grid"><label>心情<select name="mood" defaultValue="calm">{Object.entries(moodLabels).map(([key, label]) => <option value={key} key={key}>{label}</option>)}</select></label><label>天气<select name="weather"><option value="">不记录</option>{Object.entries(weatherLabels).map(([key, label]) => <option value={key} key={key}>{label}</option>)}</select></label></div><label>标签<input name="tags" placeholder="日常，开心" /></label><label>图片（最多 9 张）<input name="images" type="file" accept="image/*" multiple /></label><small>图片上传前会自动压缩至最长边约 1920px。</small></>;
-    if (modal.kind === "book") return <><label>书名<input name="title" required /></label><div className="form-grid"><label>进度方式<select name="progressMode"><option value="percent">百分比</option><option value="pages">页数</option></select></label><label>总页数<input name="totalPages" type="number" min="1" defaultValue="100" /></label></div><label>简短笔记<textarea name="note" /></label></>;
+    if (modal.kind === "diary") return <><label>记录日期<input name="occurredDate" type="date" defaultValue={today()} max={today()} required /></label><label>这一天想记什么<textarea name="content" rows={5} /></label><div className="form-grid"><label>心情<select name="mood" defaultValue="calm">{Object.entries(moodLabels).map(([key, label]) => <option value={key} key={key}>{label}</option>)}</select></label><label>天气<select name="weather"><option value="">不记录</option>{Object.entries(weatherLabels).map(([key, label]) => <option value={key} key={key}>{label}</option>)}</select></label></div><label>标签<input name="tags" placeholder="日常，开心" /></label><label>图片（最多 9 张）<input name="images" type="file" accept="image/*" multiple /></label><small>可以补写过去的日期；图片上传前会自动压缩至最长边约 1920px。</small></>;
+    if (modal.kind === "book") { const book = data.books.find((item) => item.id === modal.id); return <><label>书名<input name="title" defaultValue={book?.title} required /></label><label>{book?.coverImageId ? "更换封面（不选择则保留当前封面）" : "书籍封面"}<input name="cover" type="file" accept="image/*" /></label><div className="form-grid"><label>进度方式<select name="progressMode" defaultValue={book?.progressMode ?? "percent"}><option value="percent">百分比</option><option value="pages">页数</option></select></label><label>总页数<input name="totalPages" type="number" min="1" defaultValue={book?.totalPages || 100} /></label></div><label>简短笔记<textarea name="note" defaultValue={book?.note} /></label><small>封面会自动压缩并保存在当前设备。</small></>; }
     if (modal.kind === "habit") return <><label>习惯名称<input name="name" required /></label><div className="form-grid"><label>周期<select name="scheduleType"><option value="daily">每日</option><option value="weekdays">指定星期</option><option value="weeklyCount">每周次数</option><option value="monthlyCount">每月次数</option></select></label><label>目标次数<input name="targetCount" type="number" min="1" defaultValue="1" /></label></div><fieldset className="weekday-field"><legend>指定星期时选择</legend>{["日", "一", "二", "三", "四", "五", "六"].map((label, index) => <label key={label}><input type="checkbox" name="weekdays" value={index} />周{label}</label>)}</fieldset></>;
     if (modal.kind === "wish") return <><label>心愿名称<input name="title" required /></label><div className="form-grid"><label>类别<select name="category"><option>旅行</option><option>物品</option><option>体验</option><option>成长</option><option>追星</option></select></label><label>优先级<select name="priority"><option value="high">高</option><option value="medium">中</option><option value="low">低</option></select></label><label>目标日期<input name="targetDate" type="date" /></label><label>预算<input name="budgetAmount" type="number" min="0" step="0.01" defaultValue="0" /></label><label>币种<select name="currency"><option value="CNY">人民币</option><option value="KRW">韩元</option><option value="JPY">日元</option><option value="USD">美元</option></select></label><label>关联基金<select name="savingsTargetId"><option value="">不关联</option>{targets.map((target) => <option value={target.id} key={target.id}>{target.name} · {target.currency}</option>)}</select></label></div></>;
-    if (modal.kind === "artist") { const artist = data.artists.find((item) => item.id === modal.id) ?? data.artists[0]; const hasBirthday = data.countdowns.some((item) => item.sourceType === "artistBirthday" && item.sourceId === artist?.id && !item.deletedAt); const hasDebut = data.countdowns.some((item) => item.sourceType === "artistDebut" && item.sourceId === artist?.id && !item.deletedAt); return <><p className="form-note">艺人资料首次一次性导入，之后只能编辑，不能新增。</p><label>姓名<input name="name" defaultValue={artist?.name} required /></label><div className="form-grid"><label>昵称<input name="nickname" defaultValue={artist?.nickname} /></label><label>所属组合<input name="groupName" defaultValue={artist?.groupName} /></label><label>完整生日<input name="birthday" type="date" defaultValue={artist?.birthday} required /></label><label>出道日<input name="debutDate" type="date" defaultValue={artist?.debutDate ?? ""} /></label></div><div className="check-row"><label><input name="syncBirthday" type="checkbox" defaultChecked={hasBirthday} />同步生日倒计时</label><label><input name="syncDebut" type="checkbox" defaultChecked={hasDebut} />同步出道纪念日</label></div><label>备注<textarea name="note" defaultValue={artist?.note} /></label></>; }
+    if (modal.kind === "artist") { const artist = data.artists.find((item) => item.id === modal.id); const hasBirthday = artist ? data.countdowns.some((item) => item.sourceType === "artistBirthday" && item.sourceId === artist.id && !item.deletedAt) : true; const hasDebut = artist ? data.countdowns.some((item) => item.sourceType === "artistDebut" && item.sourceId === artist.id && !item.deletedAt) : true; return <><p className="form-note">支持添加多位艺人；每位都会生成独立展示卡片。</p><label>{artist?.avatarImageId ? "更换头像（不选择则保留）" : "艺人头像"}<input name="avatar" type="file" accept="image/*" /></label><label>姓名<input name="name" defaultValue={artist?.name} required /></label><div className="form-grid"><label>昵称<input name="nickname" defaultValue={artist?.nickname} /></label><label>所属组合<input name="groupName" defaultValue={artist?.groupName} /></label><label>完整生日<input name="birthday" type="date" defaultValue={artist?.birthday} required /></label><label>出道日<input name="debutDate" type="date" defaultValue={artist?.debutDate ?? ""} /></label></div><div className="check-row"><label><input name="syncBirthday" type="checkbox" defaultChecked={hasBirthday} />同步生日倒计时</label><label><input name="syncDebut" type="checkbox" defaultChecked={hasDebut} />同步出道纪念日</label></div><label>备注<textarea name="note" defaultValue={artist?.note} /></label><small>头像会自动压缩并只保存在当前设备。</small></>; }
     return null;
   }
 }
@@ -1096,7 +1248,15 @@ function QuickChooser({ choose }: { choose: (kind: ModalKind) => void }) {
 
 function LayoutEditor({ preferences, onChange, close }: { preferences: AppPreferences; onChange: (patch: Partial<AppPreferences>) => void; close: () => void }) {
   const move = (key: string, offset: number) => { const order = [...preferences.homeOrder]; const index = order.indexOf(key); const target = index + offset; if (target < 0 || target >= order.length) return; [order[index], order[target]] = [order[target], order[index]]; onChange({ homeOrder: order }); };
-  return <div className="layout-editor">{preferences.homeOrder.map((key) => { const hidden = preferences.hiddenHomeCards.includes(key); return <div className="layout-row" key={key}><GripVertical /><strong>{homeCardLabels[key]}</strong><button onClick={() => move(key, -1)} aria-label="上移">↑</button><button onClick={() => move(key, 1)} aria-label="下移">↓</button><button onClick={() => onChange({ homeSizes: { ...preferences.homeSizes, [key]: preferences.homeSizes[key] === "small" ? "wide" : "small" } })}>{preferences.homeSizes[key] === "small" ? "小卡" : "宽卡"}</button><label><input type="checkbox" checked={!hidden} onChange={() => onChange({ hiddenHomeCards: hidden ? preferences.hiddenHomeCards.filter((item) => item !== key) : [...preferences.hiddenHomeCards, key] })} />显示</label></div>; })}<div className="modal-actions"><button className="button button--ghost" onClick={() => onChange({ ...defaultPreferences })}>恢复默认</button><button className="button button--primary" onClick={close}><Check />完成</button></div></div>;
+  return <div className="layout-editor">
+    <div className="home-copy-editor">
+      <label>首页问候语<input value={preferences.homeGreeting} maxLength={24} onChange={(event) => onChange({ homeGreeting: event.currentTarget.value })} /></label>
+      <label>首页主文字<input value={preferences.homeMessage} maxLength={36} onChange={(event) => onChange({ homeMessage: event.currentTarget.value })} /></label>
+      <small>文字和布局修改后会立即自动保存。</small>
+    </div>
+    {preferences.homeOrder.map((key) => { const hidden = preferences.hiddenHomeCards.includes(key); return <div className="layout-row" key={key}><GripVertical /><strong>{homeCardLabels[key]}</strong><button onClick={() => move(key, -1)} aria-label="上移">↑</button><button onClick={() => move(key, 1)} aria-label="下移">↓</button><button onClick={() => onChange({ homeSizes: { ...preferences.homeSizes, [key]: preferences.homeSizes[key] === "small" ? "wide" : "small" } })}>{preferences.homeSizes[key] === "small" ? "小卡" : "宽卡"}</button><label><input type="checkbox" checked={!hidden} onChange={() => onChange({ hiddenHomeCards: hidden ? preferences.hiddenHomeCards.filter((item) => item !== key) : [...preferences.hiddenHomeCards, key] })} />显示</label></div>; })}
+    <div className="modal-actions"><button className="button button--ghost" onClick={() => onChange({ ...defaultPreferences })}>恢复默认</button><button className="button button--primary" onClick={close}><Check />完成</button></div>
+  </div>;
 }
 
 function BackupForm({ data, preferences, security, onDone, setError }: { data: AppData; preferences: AppPreferences; security: DiarySecurity | null; onDone: (date: string) => void; setError: (message: string | null) => void }) {
