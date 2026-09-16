@@ -1,11 +1,12 @@
-const CACHE = "small-planet-v1";
+const CACHE = "small-planet-github-v1";
+const asset = (path = "") => new URL(path, self.registration.scope).toString();
 const CORE = [
-  "/",
-  "/manifest.webmanifest",
-  "/icon-192.png",
-  "/icon-512.png",
-  "/banner-still-life.png",
-  "/concert-mono.png"
+  asset(),
+  asset("manifest.webmanifest"),
+  asset("icon-192.png"),
+  asset("icon-512.png"),
+  asset("banner-still-life.png"),
+  asset("concert-mono.png"),
 ];
 
 self.addEventListener("install", (event) => {
@@ -27,10 +28,12 @@ self.addEventListener("fetch", (event) => {
   event.respondWith(
     fetch(event.request)
       .then((response) => {
-        const copy = response.clone();
-        caches.open(CACHE).then((cache) => cache.put(event.request, copy));
+        if (response.ok) {
+          const copy = response.clone();
+          caches.open(CACHE).then((cache) => cache.put(event.request, copy));
+        }
         return response;
       })
-      .catch(() => caches.match(event.request).then((cached) => cached || caches.match("/"))),
+      .catch(() => caches.match(event.request).then((cached) => cached || caches.match(asset()))),
   );
 });

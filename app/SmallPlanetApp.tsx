@@ -129,6 +129,8 @@ interface ModalState {
 
 type RecordCollection = Exclude<keyof AppData, "schemaVersion">;
 
+const publicAsset = (path: string) => `${import.meta.env.BASE_URL ?? "/"}${path.replace(/^\//, "")}`;
+
 const navItems: Array<{
   id: View;
   label: string;
@@ -303,7 +305,7 @@ export default function SmallPlanetApp() {
         if (mounted) setError(reason instanceof Error ? reason.message : "无法读取本地数据");
       });
     if ("serviceWorker" in navigator) {
-      void navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+      void navigator.serviceWorker.register(publicAsset("sw.js")).catch(() => undefined);
     }
     return () => {
       mounted = false;
@@ -536,7 +538,7 @@ export default function SmallPlanetApp() {
     return (
       <>
         <section className="hero" aria-label="今日问候">
-          <div className="hero__photo">
+          <div className="hero__photo" style={{ backgroundImage: `url(${publicAsset("banner-still-life.png")})` }}>
             {preferences.homeBannerImageId && <AssetImage id={preferences.homeBannerImageId} alt="我的首页封面" />}
           </div>
           <div className="hero__copy polka-field">
@@ -610,7 +612,7 @@ export default function SmallPlanetApp() {
             {nextEvent && <p className="meta-line">{nextEvent.location} · 还有 {Math.max(daysUntil(nextEvent.startDate), 0)} 天</p>}
             {nextEvent && <p className="money-line">已花费 {formatMoney(spent, nextEvent.currency)} / 预算 {formatMoney(nextEvent.budgetAmount, nextEvent.currency)}</p>}
           </div>
-          <div className="fandom-card__image" />
+          <div className="fandom-card__image" style={{ backgroundImage: `url(${publicAsset("concert-mono.png")})` }} />
         </button>
       );
     }

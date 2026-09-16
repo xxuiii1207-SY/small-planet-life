@@ -165,7 +165,7 @@ svg { width: 19px; height: 19px; stroke-width: 1.6; flex: 0 0 auto; }
   background: var(--surface-solid);
   box-shadow: var(--shadow);
 }
-.hero__photo { min-height: 360px; background: url('/banner-still-life.png') center/cover no-repeat; filter: grayscale(1) contrast(.94); }
+.hero__photo { min-height: 360px; background-position: center; background-size: cover; background-repeat: no-repeat; filter: grayscale(1) contrast(.94); }
 .hero__photo img { width: 100%; height: 100%; min-height: 360px; object-fit: cover; }
 .hero__copy { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; padding: clamp(40px, 6vw, 85px); }
 .hero__copy h2 { margin: 6px 0 28px; font-size: clamp(34px, 4vw, 59px); letter-spacing: -.035em; }
@@ -203,7 +203,7 @@ svg { width: 19px; height: 19px; stroke-width: 1.6; flex: 0 0 auto; }
 .editorial-card { display: grid; padding: 0; }
 .editorial-card__body { display: flex; flex-direction: column; padding: 28px; }
 .fandom-card { grid-template-columns: 1.1fr .9fr; min-height: 310px; }
-.fandom-card__image { background: url('/concert-mono.png') center/cover no-repeat; filter: grayscale(1); }
+.fandom-card__image { background-position: center; background-size: cover; background-repeat: no-repeat; filter: grayscale(1); }
 .editorial-date { margin: auto 0 6px; font: 500 clamp(32px, 4vw, 53px)/1 var(--serif); }
 .meta-line, .money-line { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
 .life-card { grid-template-columns: 1fr 1fr; }
